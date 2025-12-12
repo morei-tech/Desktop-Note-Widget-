@@ -1,0 +1,7 @@
+pip install pywin32
+install it ........
+
+run this command 
+mkdir "C:\Users\YourName\StickyNote"
+cd "C:\Users\YourName\StickyNote"
+ enter your username in "your name "
