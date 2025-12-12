@@ -1,0 +1,145 @@
+# note_widget.pyw
+import os
+import json
+import tkinter as tk
+import win32gui
+import win32con
+
+# -------------------------
+# Paths & persistence
+# -------------------------
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+SAVE_FILE = os.path.join(BASE_DIR, "note_data.json")
+
+def load_text():
+    try:
+        with open(SAVE_FILE, "r", encoding="utf-8") as f:
+            return json.load(f).get("text", "")
+    except Exception:
+        return ""
+
+def save_text(content):
+    try:
+        with open(SAVE_FILE, "w", encoding="utf-8") as f:
+            json.dump({"text": content}, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print("Save error:", e)
+
+# -------------------------
+# Create window
+# -------------------------
+root = tk.Tk()
+root.overrideredirect(True)        # no titlebar
+root.attributes("-topmost", False) # not above apps (behaves like wallpaper)
+root.configure(bg="#fff5a3")
+
+# Create frame + text widget
+frame = tk.Frame(root, bd=1, relief="solid", bg="#fff5a3")
+frame.pack(fill="both", expand=True)
+text = tk.Text(frame, width=30, height=12, bg="#fff5a3", font=("Segoe UI", 11), bd=0, wrap="word")
+text.pack(padx=6, pady=6)
+
+# Load saved text
+text.insert("1.0", load_text())
+
+# Initial geometry
+start_x = 100
+start_y = 100
+start_w = 300
+start_h = 220
+root.geometry(f"{start_w}x{start_h}+{start_x}+{start_y}")
+
+# -------------------------
+# Attach to desktop wallpaper layer (WorkerW)
+# -------------------------
+def get_workerw():
+    progman = win32gui.FindWindow("Progman", None)
+    # Trigger creating the WorkerW behind icons
+    win32gui.SendMessageTimeout(progman, 0x052C, 0, 0, win32con.SMTO_NORMAL, 1000)
+    workerws = []
+    def enum_handler(hwnd, lParam):
+        if win32gui.FindWindowEx(hwnd, 0, "SHELLDLL_DefView", None):
+            workerw = win32gui.FindWindowEx(0, hwnd, "WorkerW", None)
+            workerws.append(workerw)
+    win32gui.EnumWindows(enum_handler, None)
+    return workerws[0] if workerws else None
+
+hwnd = win32gui.FindWindow("TkTopLevel", None)
+workerw = get_workerw()
+if workerw:
+    win32gui.SetParent(hwnd, workerw)
+
+# -------------------------
+# Dragging logic (left click)
+# -------------------------
+is_dragging = False
+drag_start_x = drag_start_y = 0
+
+def on_button_down(event):
+    global is_dragging, drag_start_x, drag_start_y
+    is_dragging = True
+    # pointer relative to window
+    drag_start_x = event.x_root - root.winfo_x()
+    drag_start_y = event.y_root - root.winfo_y()
+
+def on_button_up(event):
+    global is_dragging
+    is_dragging = False
+    autosave_now()
+
+def on_motion(event):
+    if not is_dragging:
+        return
+    x = event.x_root - drag_start_x
+    y = event.y_root - drag_start_y
+    root.geometry(f"+{x}+{y}")
+
+# Bind dragging on the frame (so you can drag anywhere on note background)
+frame.bind("<ButtonPress-1>", on_button_down)
+frame.bind("<ButtonRelease-1>", on_button_up)
+frame.bind("<B1-Motion>", on_motion)
+
+# -------------------------
+# Right-click menu (close/save)
+# -------------------------
+menu = tk.Menu(root, tearoff=0)
+def close_and_save():
+    autosave_now()
+    root.destroy()
+
+menu.add_command(label="Save", command=lambda: autosave_now())
+menu.add_command(label="Exit", command=close_and_save)
+
+def on_right_click(event):
+    menu.tk_popup(event.x_root, event.y_root)
+
+frame.bind("<Button-3>", on_right_click)  # Right-click
+
+# -------------------------
+# Autosave logic
+# -------------------------
+save_interval_ms = 5000  # save every 5 seconds
+
+def autosave_now():
+    content = text.get("1.0", "end-1c")
+    save_text(content)
+
+def autosave_loop():
+    autosave_now()
+    root.after(save_interval_ms, autosave_loop)
+
+# Start autosave
+root.after(save_interval_ms, autosave_loop)
+
+# Save on close (in case user closes by other means)
+def on_closing():
+    autosave_now()
+    root.destroy()
+
+root.protocol("WM_DELETE_WINDOW", on_closing)
+
+# Make the text widget focusable so you can type without clicking titlebar
+text.focus_set()
+
+# Run UI loop
+root.mainloop()
